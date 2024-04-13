@@ -7,120 +7,110 @@ terraform {
   }
 }
 
-# Configure the AWS Provider
-provider "aws" {
-  region = "us-east-1"
-}
 
-#Retrieve the list of AZs in the current AWS region
-data "aws_availability_zones" "available" {}
-data "aws_region" "current" {}
+# aws_vpc.tf
 
-#Define the VPC
-resource "aws_vpc" "vpc" {
-  cidr_block = var.vpc_cidr
+# Create a VPC
+resource "aws_vpc" "my-vpc" {
+  cidr_block = "10.0.0.0/16"
 
   tags = {
-    Name        = var.vpc_name
-    Environment = "demo_environment"
-    Terraform   = "true"
+    Name = "my-vpc"
   }
 }
 
-#Deploy the private subnets
-resource "aws_subnet" "private_subnets" {
-  for_each          = var.private_subnets
-  vpc_id            = aws_vpc.vpc.id
-  cidr_block        = cidrsubnet(var.vpc_cidr, 8, each.value)
-  availability_zone = tolist(data.aws_availability_zones.available.names)[each.value]
-
-  tags = {
-    Name      = each.key
-    Terraform = "true"
-  }
-}
-
-#Deploy the public subnets
-resource "aws_subnet" "public_subnets" {
-  for_each                = var.public_subnets
-  vpc_id                  = aws_vpc.vpc.id
-  cidr_block              = cidrsubnet(var.vpc_cidr, 8, each.value + 100)
-  availability_zone       = tolist(data.aws_availability_zones.available.names)[each.value]
+# Create a public subnet
+resource "aws_subnet" "public-a" {
+  vpc_id                  = aws_vpc.my-vpc.id
+  cidr_block              = "10.0.0.0/24"
+  availability_zone       = "us-east-1a"
   map_public_ip_on_launch = true
 
   tags = {
-    Name      = each.key
-    Terraform = "true"
+    Name = "public-a"
   }
 }
 
-#Create route tables for public and private subnets
-resource "aws_route_table" "public_route_table" {
-  vpc_id = aws_vpc.vpc.id
+# Create a private subnet
+resource "aws_subnet" "private-a" {
+  vpc_id                  = aws_vpc.my-vpc.id
+  cidr_block              = "10.0.1.0/24"
+  availability_zone       = "us-east-1a"
+  map_public_ip_on_launch = false
 
-  route {
-    cidr_block     = "0.0.0.0/0"
-    gateway_id     = aws_internet_gateway.internet_gateway.id
-    #nat_gateway_id = aws_nat_gateway.nat_gateway.id
-  }
   tags = {
-    Name      = "demo_public_rtb"
-    Terraform = "true"
+    Name = "private-a"
   }
 }
 
-resource "aws_route_table" "private_route_table" {
-  vpc_id = aws_vpc.vpc.id
+# security_group.tf
 
-  route {
-    cidr_block     = "0.0.0.0/0"
-    # gateway_id     = aws_internet_gateway.internet_gateway.id
-    nat_gateway_id = aws_nat_gateway.nat_gateway.id
+# Create a security group
+resource "aws_security_group" "my-sg" {
+  name        = "my-sg"
+  description = "Security group for my resources"
+  vpc_id      = aws_vpc.my-vpc.id
+
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   tags = {
-    Name      = "demo_private_rtb"
-    Terraform = "true"
+    Name = "my-sg"
   }
-}
+} 
 
-#Create route table associations
-resource "aws_route_table_association" "public" {
-  depends_on     = [aws_subnet.public_subnets]
-  route_table_id = aws_route_table.public_route_table.id
-  for_each       = aws_subnet.public_subnets
-  subnet_id      = each.value.id
-}
+# aws_lb_listner.tf
 
-resource "aws_route_table_association" "private" {
-  depends_on     = [aws_subnet.private_subnets]
-  route_table_id = aws_route_table.private_route_table.id
-  for_each       = aws_subnet.private_subnets
-  subnet_id      = each.value.id
-}
+# Create an ALB
+resource "aws_lb" "my-alb" {
+  name            = "my-alb"
+  internal        = false
+  load_balancer_type = "application"
+  security_groups = [aws_security_group.my-sg.id]
+  subnets         = [aws_subnet.public-a.id, aws_subnet.private-a.id]
 
-#Create Internet Gateway
-resource "aws_internet_gateway" "internet_gateway" {
-  vpc_id = aws_vpc.vpc.id
   tags = {
-    Name = "demo_igw"
+    Name = "my-alb"
   }
 }
 
-#Create EIP for NAT Gateway
-resource "aws_eip" "nat_gateway_eip" {
-  domain     = "vpc"
-  depends_on = [aws_internet_gateway.internet_gateway]
+# Create a listener for the ALB
+resource "aws_lb_listener" "my-listener" {
+  load_balancer_arn = aws_lb.my-alb.arn
+  protocol          = "HTTP"
+  port              = 80
+  default_action {
+    type = "forward"
+    target_group_arn = aws_lb_target_group.my-tg.arn
+  }
+} 
+
+# certificate_config.tf
+
+# Request and validate an SSL certificate from AWS Certificate Manager (ACM)
+resource "aws_acm_certificate" "my-certificate" {
+  domain_name       = "awschamp.com"
+  validation_method = "DNS"
+
   tags = {
-    Name = "demo_igw_eip"
+    Name = "awschamp.com SSL certificate"
   }
 }
 
-#Create NAT Gateway
-resource "aws_nat_gateway" "nat_gateway" {
-  depends_on    = [aws_subnet.public_subnets]
-  allocation_id = aws_eip.nat_gateway_eip.id
-  subnet_id     = aws_subnet.public_subnets["public_subnet_1"].id
-  tags = {
-    Name = "demo_nat_gateway"
-  }
+# Associate the SSL certificate with the ALB listener
+resource "aws_lb_listener_certificate" "my-certificate" {
+  listener_arn = aws_lb_listener.my-listener.arn
+  certificate_arn = aws_acm_certificate.my-certificate.arn
 }
