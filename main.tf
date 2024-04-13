@@ -86,31 +86,3 @@ resource "aws_lb" "my-alb" {
   }
 }
 
-# Create a listener for the ALB
-resource "aws_lb_listener" "my-listener" {
-  load_balancer_arn = aws_lb.my-alb.arn
-  protocol          = "HTTP"
-  port              = 80
-  default_action {
-    type = "forward"
-    target_group_arn = aws_lb_target_group.my-tg.arn
-  }
-} 
-
-# certificate_config.tf
-
-# Request and validate an SSL certificate from AWS Certificate Manager (ACM)
-resource "aws_acm_certificate" "my-certificate" {
-  domain_name       = "awschamp.com"
-  validation_method = "DNS"
-
-  tags = {
-    Name = "awschamp.com SSL certificate"
-  }
-}
-
-# Associate the SSL certificate with the ALB listener
-resource "aws_lb_listener_certificate" "my-certificate" {
-  listener_arn = aws_lb_listener.my-listener.arn
-  certificate_arn = aws_acm_certificate.my-certificate.arn
-}
