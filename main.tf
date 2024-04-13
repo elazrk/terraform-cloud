@@ -7,82 +7,49 @@ terraform {
   }
 }
 
+provider "aws" {
+  region = "us-east-1"
+}
 
-# aws_vpc.tf
-
-# Create a VPC
-resource "aws_vpc" "my-vpc" {
-  cidr_block = "10.0.0.0/16"
+resource "aws_vpc" "example" {
+  cidr_block = "172.16.0.0/16"
 
   tags = {
-    Name = "my-vpc"
+    Name = "tf-example"
   }
 }
 
-# Create a public subnet
-resource "aws_subnet" "public-a" {
-  vpc_id                  = aws_vpc.my-vpc.id
-  cidr_block              = "10.0.0.0/24"
-  availability_zone       = "us-east-1a"
-  map_public_ip_on_launch = true
+resource "aws_subnet" "example" {
+  vpc_id            = aws_vpc.example.id
+  cidr_block        = "172.16.10.0/24"
+  availability_zone = "us-east-2a"
 
   tags = {
-    Name = "public-a"
+    Name = "tf-example"
   }
 }
 
-# Create a private subnet
-resource "aws_subnet" "private-a" {
-  vpc_id                  = aws_vpc.my-vpc.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = "us-east-1a"
-  map_public_ip_on_launch = false
+data "aws_ami" "amzn-linux-2023-ami" {
+  most_recent = true
+  owners      = ["amazon"]
 
-  tags = {
-    Name = "private-a"
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
   }
 }
 
-# security_group.tf
+resource "aws_instance" "example" {
+  ami           = data.aws_ami.amzn-linux-2023-ami.id
+  instance_type = "t2.micro"
+  subnet_id     = aws_subnet.example.id
 
-# Create a security group
-resource "aws_security_group" "my-sg" {
-  name        = "my-sg"
-  description = "Security group for my resources"
-  vpc_id      = aws_vpc.my-vpc.id
-
-  ingress {
-    description = "SSH"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+  cpu_options {
+    core_count       = 2
+    threads_per_core = 2
   }
 
   tags = {
-    Name = "my-sg"
-  }
-} 
-
-# aws_lb_listner.tf
-
-# Create an ALB
-resource "aws_lb" "my-alb" {
-  name            = "my-alb"
-  internal        = false
-  load_balancer_type = "application"
-  security_groups = [aws_security_group.my-sg.id]
-  subnets         = [aws_subnet.public-a.id, aws_subnet.private-a.id]
-
-  tags = {
-    Name = "my-alb"
+    Name = "tf-example"
   }
 }
-
